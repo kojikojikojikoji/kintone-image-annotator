@@ -314,13 +314,17 @@ export function openEditor(session: EditorSession, callbacks: EditorCallbacks): 
     );
   }
 
-  function applyZoom(nextPercent: number, anchorDisplay?: { x: number; y: number }): void {
+  function applyZoom(
+    nextPercent: number,
+    anchorDisplay?: { x: number; y: number },
+    anchorCanvasOverride?: { x: number; y: number },
+  ): void {
     const vp = viewportSize();
     const clamped = clampZoom(nextPercent);
     const canvasSize = { width: session.canvasWidth, height: session.canvasHeight };
     const newScale = scaleForZoom(clamped, canvasSize, vp);
     const anchor = anchorDisplay ?? { x: vp.width / 2, y: vp.height / 2 };
-    const anchorCanvas = displayToCanvas(anchor, viewport);
+    const anchorCanvas = anchorCanvasOverride ?? displayToCanvas(anchor, viewport);
     viewport = clampPan(zoomAround(anchor, anchorCanvas, newScale), canvasSize, vp);
     zoomPercent = clamped;
     zoomValue.textContent = `${clamped}%`;
@@ -367,6 +371,7 @@ export function openEditor(session: EditorSession, callbacks: EditorCallbacks): 
   let lastPanClient = { x: 0, y: 0 };
   let pinchStartDist = 0;
   let pinchStartZoom = 100;
+  let pinchAnchorCanvas = { x: 0, y: 0 };
 
   function toCanvasPoint(clientX: number, clientY: number): { x: number; y: number } {
     const rect = canvas.getBoundingClientRect();
@@ -379,6 +384,12 @@ export function openEditor(session: EditorSession, callbacks: EditorCallbacks): 
 
   function onPointerDown(event: PointerEvent): void {
     if (textOverlay) return;
+
+    // Palm rejection first: a touch landing while the pen draws must not be
+    // tracked at all, or it would count toward the two-pointer pinch branch,
+    // cancel the pen stroke and leave penActive stuck (FR-5).
+    if (penActive && event.pointerType === "touch") return;
+
     activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
     // Two-finger pan/pinch (touch).
@@ -386,8 +397,6 @@ export function openEditor(session: EditorSession, callbacks: EditorCallbacks): 
       beginPinch();
       return;
     }
-    // Palm rejection: ignore touch while a pen is drawing (FR-5).
-    if (penActive && event.pointerType === "touch") return;
 
     const wantPan = spaceDown || event.button === 1;
     if (wantPan) {
@@ -457,6 +466,26 @@ export function openEditor(session: EditorSession, callbacks: EditorCallbacks): 
       preview = buildDragShape(startCanvas, pt);
     }
     render();
+  }
+
+  // A cancelled pointer (OS gesture, palm dialog, window blur) must abort the
+  // in-progress shape, never commit a partial one through the pointer-up path.
+  function onPointerCancel(event: PointerEvent): void {
+    activePointers.delete(event.pointerId);
+    if (pinchStartDist > 0 && activePointers.size < 2) {
+      pinchStartDist = 0;
+    }
+    if (panning) {
+      panning = false;
+      updateCursor();
+    }
+    if (drawingPointerId === event.pointerId) {
+      drawingPointerId = null;
+      if (event.pointerType === "pen") penActive = false;
+      preview = null;
+      penPoints = [];
+      render();
+    }
   }
 
   function onPointerUp(event: PointerEvent): void {
@@ -565,6 +594,14 @@ export function openEditor(session: EditorSession, callbacks: EditorCallbacks): 
     if (pair.length < 2) return;
     pinchStartDist = distance(pair[0], pair[1]);
     pinchStartZoom = zoomPercent;
+    // Anchor the canvas point under the starting midpoint for the whole
+    // gesture. Re-deriving it every move would cancel out two-finger panning.
+    const midClient = { x: (pair[0].x + pair[1].x) / 2, y: (pair[0].y + pair[1].y) / 2 };
+    const rect = canvas.getBoundingClientRect();
+    pinchAnchorCanvas = displayToCanvas(
+      { x: midClient.x - rect.left, y: midClient.y - rect.top },
+      viewport,
+    );
     drawingPointerId = null;
     preview = null;
   }
@@ -575,7 +612,11 @@ export function openEditor(session: EditorSession, callbacks: EditorCallbacks): 
     const factor = d / pinchStartDist;
     const midClient = { x: (pair[0].x + pair[1].x) / 2, y: (pair[0].y + pair[1].y) / 2 };
     const rect = canvas.getBoundingClientRect();
-    applyZoom(pinchStartZoom * factor, { x: midClient.x - rect.left, y: midClient.y - rect.top });
+    applyZoom(
+      pinchStartZoom * factor,
+      { x: midClient.x - rect.left, y: midClient.y - rect.top },
+      pinchAnchorCanvas,
+    );
   }
 
   function onWheel(event: WheelEvent): void {
@@ -710,7 +751,8 @@ export function openEditor(session: EditorSession, callbacks: EditorCallbacks): 
       closeTextOverlay();
       return;
     }
-    if (dirty && currentShapes().length > 0) {
+    // Any unsaved change prompts, including a clear-all that left zero shapes.
+    if (dirty) {
       const ok = await confirmDialog({
         message: "注釈が保存されていません。閉じますか？",
         confirmLabel: "閉じる",
@@ -732,7 +774,7 @@ export function openEditor(session: EditorSession, callbacks: EditorCallbacks): 
     canvas.removeEventListener("pointerdown", onPointerDown);
     canvas.removeEventListener("pointermove", onPointerMove);
     canvas.removeEventListener("pointerup", onPointerUp);
-    canvas.removeEventListener("pointercancel", onPointerUp);
+    canvas.removeEventListener("pointercancel", onPointerCancel);
     canvas.removeEventListener("wheel", onWheel);
     document.removeEventListener("keydown", onKeyDown, true);
     document.removeEventListener("keyup", onKeyUp, true);
@@ -743,7 +785,7 @@ export function openEditor(session: EditorSession, callbacks: EditorCallbacks): 
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerup", onPointerUp);
-  canvas.addEventListener("pointercancel", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerCancel);
   canvas.addEventListener("wheel", onWheel, { passive: false });
   document.addEventListener("keydown", onKeyDown, true);
   document.addEventListener("keyup", onKeyUp, true);

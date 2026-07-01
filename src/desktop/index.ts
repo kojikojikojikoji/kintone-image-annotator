@@ -1,4 +1,4 @@
-import { buildAnnotatedFileName } from "../core/naming";
+import { buildAnnotatedFileName, disambiguateKey } from "../core/naming";
 import { parsePluginConfig, type PluginConfig } from "../core/config";
 import {
   buildUpdatedStore,
@@ -199,7 +199,7 @@ async function saveAnnotated(params: {
   sourceFileName: string;
 }): Promise<SaveResult> {
   const outputFormat = { type: params.output.mime === "image/jpeg" ? "jpeg" : "png" } as const;
-  const fileName = buildAnnotatedFileName(
+  const baseFileName = buildAnnotatedFileName(
     params.sourceFileName,
     outputFormat.type === "jpeg"
       ? { type: "jpeg", mime: "image/jpeg", quality: 0.9 }
@@ -208,7 +208,6 @@ async function saveAnnotated(params: {
   );
 
   try {
-    const newFileKey = await gateway.uploadFile(fileName, params.blob);
     const { record, revision } = await gateway.getRecord(params.app, params.recordId);
 
     // Save back into the field the image was opened from, not the first
@@ -219,8 +218,17 @@ async function saveAnnotated(params: {
       return { ok: false, message: "保存に失敗しました。通信環境を確認してやり直してください" };
     }
 
-    // All-replace: map existing files then push the new one (7.3 step 4).
     const existing = (record[targetField]?.value as FileValue[]) ?? [];
+    // The uploaded name must be unique among the field's attachments BEFORE
+    // upload, so the shape-data store key always equals a real file name.
+    // Disambiguating only the store key left entries unmatched and prunable.
+    const fileName = disambiguateKey(
+      baseFileName,
+      existing.map((f) => f.name),
+    );
+    const newFileKey = await gateway.uploadFile(fileName, params.blob);
+
+    // All-replace: map existing files then push the new one (7.3 step 4).
     const attachmentValue = existing.map((f) => ({ fileKey: f.fileKey }));
     attachmentValue.push({ fileKey: newFileKey });
 
