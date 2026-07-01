@@ -1,0 +1,28 @@
+{
+  "manifest_version": 2,
+  "version": 1,
+  "type": "APP",
+  "name": {
+    "en": "Image Annotator",
+    "ja": "画像アノテーター"
+  },
+  "description": {
+    "en": "Annotate images in an attachment field with arrows, shapes, and text, then save the annotated copy back to the same field.",
+    "ja": "添付ファイルフィールドの画像に矢印・図形・テキストで注釈し、同じフィールドへ追加保存します。"
+  },
+  "icon": "image/icon.png",
+  "homepage_url": {
+    "en": "https://github.com/kojikojikojikoji/kintone-image-annotator",
+    "ja": "https://github.com/kojikojikojikoji/kintone-image-annotator"
+  },
+  "desktop": {
+    "js": ["js/desktop.js"],
+    "css": []
+  },
+  "config": {
+    "html": "config/config.html",
+    "js": ["js/config.js"],
+    "css": ["config/theme.css"],
+    "required_params": []
+  }
+}
