@@ -60,12 +60,13 @@ async function loadThumbnail(file: SelectableFile): Promise<string | null> {
 
 async function openForFile(params: {
   file: SelectableFile;
+  fieldCode: string;
   config: PluginConfig;
   app: number;
   recordId: number;
   store: AnnotationStore | null;
 }): Promise<void> {
-  const { file, config, app, recordId, store } = params;
+  const { file, fieldCode, config, app, recordId, store } = params;
   const entry = findEntry(store, file.name);
 
   // Determine the image to load and initial shapes.
@@ -85,6 +86,7 @@ async function openForFile(params: {
       sourceKey = entry.sourceFileKey;
       sourceName = entry.sourceFileName;
       await launchEditor({
+        fieldCode,
         bitmap: prepared.bitmap,
         canvasWidth: prepared.width,
         canvasHeight: prepared.height,
@@ -123,6 +125,7 @@ async function openForFile(params: {
       return;
     }
     await launchEditor({
+      fieldCode,
       bitmap: prepared.bitmap,
       canvasWidth: prepared.width,
       canvasHeight: prepared.height,
@@ -155,14 +158,20 @@ function guessTypeFromName(name: string): string | null {
 }
 
 async function launchEditor(
-  params: EditorSession & { config: PluginConfig; app: number; recordId: number },
+  params: EditorSession & {
+    fieldCode: string;
+    config: PluginConfig;
+    app: number;
+    recordId: number;
+  },
 ): Promise<void> {
-  const { config, app, recordId, ...session } = params;
+  const { fieldCode, config, app, recordId, ...session } = params;
   openEditor(session, {
     onSave: (payload) =>
       saveAnnotated({
         app,
         recordId,
+        fieldCode,
         config,
         output: payload.output,
         blob: payload.blob,
@@ -179,6 +188,7 @@ async function launchEditor(
 async function saveAnnotated(params: {
   app: number;
   recordId: number;
+  fieldCode: string;
   config: PluginConfig;
   output: { mime: string };
   blob: Blob;
@@ -201,11 +211,11 @@ async function saveAnnotated(params: {
     const newFileKey = await gateway.uploadFile(fileName, params.blob);
     const { record, revision } = await gateway.getRecord(params.app, params.recordId);
 
-    const targetField = params.config.settings.targetFields.find((code) => {
-      const f = record[code];
-      return f && f.type === "FILE";
-    });
-    if (!targetField) {
+    // Save back into the field the image was opened from, not the first
+    // configured one (a record can have several annotation targets).
+    const targetField = params.fieldCode;
+    const targetValue = record[targetField];
+    if (!targetValue || targetValue.type !== "FILE") {
       return { ok: false, message: "保存に失敗しました。通信環境を確認してやり直してください" };
     }
 
@@ -301,7 +311,7 @@ function handleField(params: {
     }));
     openSelectModal(selectable, {
       loadThumbnail,
-      onPick: (file) => void openForFile({ file, config, app, recordId, store }),
+      onPick: (file) => void openForFile({ file, fieldCode, config, app, recordId, store }),
     });
   });
   element.insertAdjacentElement("afterend", btn);
