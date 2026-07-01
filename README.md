@@ -1,5 +1,7 @@
 # kintone-image-annotator
 
+Documentation in Japanese: [README.ja.md](./README.ja.md)
+
 Draw arrows, shapes, and text on an image stored in a kintone attachment field,
 then save the annotated copy back into the same field. The original file stays,
 so the state before the markup is always available.
