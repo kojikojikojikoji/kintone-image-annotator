@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@kintone/rest-api-client": "^5.7.2",
-    "zod": "^3.23.8"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@kintone/dts-gen": "^8.1.1",
